@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -332,22 +333,7 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, c.comment AS comment, c.created_at AS created_at
-FROM comments c
-JOIN entries e ON c.entry_id = e.id
-WHERE e.user_id = ?
-ORDER BY c.created_at DESC
-LIMIT 10`, user.ID)
-	if err != sql.ErrNoRows {
-		checkErr(err)
-	}
-	commentsForMe := make([]Comment, 0, 10)
-	for rows.Next() {
-		c := Comment{}
-		checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt))
-		commentsForMe = append(commentsForMe, c)
-	}
-	rows.Close()
+	commentsForMe := getCommentsForMe(user.ID, 10)
 
 	// フレンド一覧を取得
 	rows, err = db.Query(`SELECT * FROM relations WHERE one = ? OR another = ? ORDER BY created_at DESC`, user.ID, user.ID)
@@ -652,8 +638,12 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 	}
 	user := getCurrentUser(w, r)
 
-	_, err = db.Exec(`INSERT INTO comments (entry_id, user_id, comment) VALUES (?,?,?)`, entry.ID, user.ID, r.FormValue("comment"))
+	res, err := db.Exec(`INSERT INTO comments (entry_id, user_id, comment) VALUES (?,?,?)`, entry.ID, user.ID, r.FormValue("comment"))
 	checkErr(err)
+	lastID, err := res.LastInsertId()
+	checkErr(err)
+	commentCh <- Comment{int(lastID), entry.ID, user.ID, r.FormValue("comment"), time.Now()}
+
 	http.Redirect(w, r, "/diary/entry/"+strconv.Itoa(entry.ID), http.StatusSeeOther)
 }
 
@@ -734,10 +724,63 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 	db.Exec("DELETE FROM footprints WHERE id > 500000")
 	db.Exec("DELETE FROM entries WHERE id > 500000")
 	db.Exec("DELETE FROM comments WHERE id > 1500000")
+	initCommentsForMe()
 }
 
 func init() {
 	flag.Parse()
+}
+
+var commentCh = make(chan Comment, 10000)
+var commentsForMeTable = make(map[int][]Comment)
+var commentsForMeMutex = sync.Mutex{}
+
+func commentsForMeWorker() {
+	for {
+		comment := <-commentCh
+		commentsForMeMutex.Lock()
+		_, ok := commentsForMeTable[comment.UserID]
+		if !ok {
+			commentsForMeTable[comment.UserID] = make([]Comment, 0, 100)
+		}
+		commentsForMeTable[comment.UserID] = append(commentsForMeTable[comment.UserID], comment)
+		commentsForMeMutex.Unlock()
+	}
+}
+
+func getCommentsForMe(userID int, num int) []Comment {
+	commentsForMeMutex.Lock()
+	defer commentsForMeMutex.Unlock()
+
+	comments, ok := commentsForMeTable[userID]
+	if !ok {
+		return make([]Comment, 0)
+	}
+	return comments[:num]
+}
+
+func initCommentsForMe() {
+	commentsForMeMutex.Lock()
+	commentsForMeTable = make(map[int][]Comment)
+	commentsForMeMutex.Unlock()
+
+	fmt.Println("start initCommentsForMe")
+
+	rows, err := db.Query(`SELECT * FROM comments ORDER BY created_at ASC`)
+	if err != nil && err != sql.ErrNoRows {
+		panic(err)
+	}
+	for rows.Next() {
+		c := Comment{}
+		err = rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt)
+		if err != nil {
+			panic(err)
+		}
+		commentCh <- c
+	}
+	rows.Close()
+
+	fmt.Println("finish initCommentsForMe")
 }
 
 func main() {
@@ -825,6 +868,9 @@ func main() {
 	sigchan := make(chan os.Signal)
 	signal.Notify(sigchan, syscall.SIGTERM)
 	signal.Notify(sigchan, syscall.SIGINT)
+
+	go commentsForMeWorker()
+	initCommentsForMe()
 
 	var li net.Listener
 	sock := "/dev/shm/server.sock"
