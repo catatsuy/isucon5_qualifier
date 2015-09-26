@@ -55,6 +55,17 @@ type Entry struct {
 	CreatedAt time.Time
 }
 
+type EntryWithUser struct {
+	ID        int
+	UserID    int
+	Private   bool
+	Title     string
+	Content   string
+	CreatedAt time.Time
+	UserAccountName string
+	UserNickName string
+}
+
 type Comment struct {
 	ID        int
 	EntryID   int
@@ -377,20 +388,20 @@ LIMIT 10`, user.ID)
 	}
 	rows.Close()
 
-	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, strings.Join(friendIds, ",")))
+	rows, err = db.Query(fmt.Sprintf(`SELECT e.id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, e.created_at, u.account_name, u.nick_name FROM entries e JOIN users u on e.user_id = u.id WHERE user_id IN (%s) ORDER BY e.created_at DESC LIMIT 10`, strings.Join(friendIds, ",")))
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
-	entriesOfFriends := make([]Entry, 0, 10)
+	entriesOfFriends := make([]EntryWithUser, 0, 10)
 	for rows.Next() {
 		var id, userID, private int
-		var subject string
+		var subject, accountName, nickname string
 		var createdAt time.Time
-		checkErr(rows.Scan(&id, &userID, &private, &subject, &createdAt))
+		checkErr(rows.Scan(&id, &userID, &private, &subject, &createdAt, &accountName, &nickname))
 		if !isFriend2(friendsMap, userID) {
 			continue
 		}
-		entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, subject, "", createdAt})
+		entriesOfFriends = append(entriesOfFriends, EntryWithUser{id, userID, private == 1, subject, "", createdAt, accountName, nickname})
 		if len(entriesOfFriends) >= 10 {
 			break
 		}
@@ -448,7 +459,7 @@ LIMIT 10`, user.ID)
 		Profile           Profile
 		Entries           []Entry
 		CommentsForMe     []Comment
-		EntriesOfFriends  []Entry
+		EntriesOfFriends  []EntryWithUser
 		CommentsOfFriends []Comment
 		Friends           []Friend
 		Footprints        []Footprint
