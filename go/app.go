@@ -398,7 +398,7 @@ LIMIT 10`, user.ID)
 	rows.Close()
 
 	// コメントを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
-	query := fmt.Sprintf(`SELECT id, entry_id, user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, created_at FROM comments WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, strings.Join(friendIds, ","))
+	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, strings.Join(friendIds, ","))
 	rows, err = db.Query(query)
 	if err != sql.ErrNoRows {
 		checkErr(err)
@@ -406,16 +406,14 @@ LIMIT 10`, user.ID)
 	commentsOfFriends := make([]Comment, 0, 10)
 	for rows.Next() {
 		c := Comment{}
-		checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt))
+		var id, userID, private int
+		var subject string
+		var createdAt time.Time
+		checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt, &id, &userID, &private, &subject, &createdAt))
 		if !isFriend2(friendsMap, c.UserID) {
 			continue
 		}
-		row := db.QueryRow(`SELECT * FROM entries WHERE id = ?`, c.EntryID)
-		var id, userID, private int
-		var body string
-		var createdAt time.Time
-		checkErr(row.Scan(&id, &userID, &private, &body, &createdAt))
-		entry := Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt}
+		entry := Entry{id, userID, private == 1, subject, "", createdAt}
 		if entry.Private {
 			if !permitted(w, r, entry.UserID) {
 				continue
