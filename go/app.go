@@ -756,7 +756,11 @@ func getCommentsForMe(userID int, num int) []Comment {
 	if !ok {
 		return make([]Comment, 0)
 	}
-	return comments[:num]
+	coms := make([]Comment, num)
+	for i, c := range comments[len(comments)-num:] {
+		coms[num-i-1] = c
+	}
+	return coms
 }
 
 func initCommentsForMe() {
