@@ -765,7 +765,7 @@ func main() {
 			"%s:%s@unix(%s)/%s?parseTime=true&loc=Local",
 			user,
 			password,
-			"/var/lib/mysql/mysql.sock",
+			"/var/run/mysqld/mysqld.sock",
 			dbname,
 		)
 
