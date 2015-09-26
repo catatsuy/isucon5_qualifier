@@ -355,6 +355,7 @@ LIMIT 10`, user.ID)
 		checkErr(err)
 	}
 	friendsMap := make(map[int]time.Time)
+	friendIds := make([]string, 0)
 	for rows.Next() {
 		var id, one, another int
 		var createdAt time.Time
@@ -367,6 +368,7 @@ LIMIT 10`, user.ID)
 		}
 		if _, ok := friendsMap[friendID]; !ok {
 			friendsMap[friendID] = createdAt
+			friendIds = append(friendIds, strconv.Itoa(friendID))
 		}
 	}
 	friends := make([]Friend, 0, len(friendsMap))
@@ -375,8 +377,7 @@ LIMIT 10`, user.ID)
 	}
 	rows.Close()
 
-	// エントリーを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
-	rows, err = db.Query(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries ORDER BY created_at DESC LIMIT 1000`)
+	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, strings.Join(friendIds, ",")))
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
