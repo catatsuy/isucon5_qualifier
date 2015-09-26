@@ -261,12 +261,12 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 		},
 		"split": strings.Split,
 		"getEntry": func(id int) Entry {
-			row := db.QueryRow(`SELECT entries.id, entries.user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, SUBSTRING_INDEX(body, '\n', 2) as body FROM entries WHERE id=?`, id)
+			row := db.QueryRow(`SELECT entries.id, entries.user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries WHERE id=?`, id)
 			var entryID, userID, private int
-			var subject, body string
+			var subject string
 			var createdAt time.Time
-			checkErr(row.Scan(&entryID, &userID, &private, &subject, &body, &createdAt))
-			return Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt}
+			checkErr(row.Scan(&entryID, &userID, &private, &subject, &createdAt))
+			return Entry{id, userID, private == 1, subject, "", createdAt}
 		},
 		"numComments": func(id int) int {
 			row := db.QueryRow(`SELECT COUNT(*) AS c FROM comments WHERE entry_id = ?`, id)
@@ -376,20 +376,20 @@ LIMIT 10`, user.ID)
 	rows.Close()
 
 	// エントリーを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
-	rows, err = db.Query(`SELECT * FROM entries ORDER BY created_at DESC LIMIT 1000`)
+	rows, err = db.Query(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries ORDER BY created_at DESC LIMIT 1000`)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
 	entriesOfFriends := make([]Entry, 0, 10)
 	for rows.Next() {
 		var id, userID, private int
-		var body string
+		var subject string
 		var createdAt time.Time
-		checkErr(rows.Scan(&id, &userID, &private, &body, &createdAt))
+		checkErr(rows.Scan(&id, &userID, &private, &subject, &createdAt))
 		if !isFriend2(friendsMap, userID) {
 			continue
 		}
-		entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt})
+		entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, subject, "", createdAt})
 		if len(entriesOfFriends) >= 10 {
 			break
 		}
