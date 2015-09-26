@@ -72,7 +72,7 @@ type CommentWithEntry struct {
 	UserID    int
 	Comment   string
 	CreatedAt time.Time
-	Entry Entry
+	Entry     Entry
 }
 
 type Friend struct {
@@ -410,9 +410,9 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 
 	entryIndex := ""
 	if len(friendIds) > 20 {
-	  entryIndex = "created_at"
+		entryIndex = "created_at"
 	} else {
-	  entryIndex = "user_id"
+		entryIndex = "user_id"
 	}
 	// fmt.Println(entryIndex)
 	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
@@ -438,9 +438,9 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	// コメントを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
 	commentIndex := ""
 	if len(friendIds) > 20 {
-	  commentIndex = "created_at"
+		commentIndex = "created_at"
 	} else {
-	  commentIndex = "user_id"
+		commentIndex = "user_id"
 	}
 	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
 	// fmt.Println(query)
@@ -768,8 +768,9 @@ func init() {
 	flag.Parse()
 
 	rd = redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-		DB:   0,
+		Network: "unix",
+		Addr:    "/tmp/redis.sock",
+		DB:      0,
 	})
 }
 
