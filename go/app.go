@@ -755,7 +755,7 @@ func init() {
 
 var commentCh = make(chan Comment, 10000)
 var commentsForMeTable = make(map[int][]Comment)
-var commentsForMeMutex = sync.Mutex{}
+var commentsForMeMutex = sync.RWMutex{}
 
 func commentsForMeWorker() {
 	for {
@@ -771,8 +771,8 @@ func commentsForMeWorker() {
 }
 
 func getCommentsForMe(userID int, num int) []Comment {
-	commentsForMeMutex.Lock()
-	defer commentsForMeMutex.Unlock()
+	commentsForMeMutex.RLock()
+	defer commentsForMeMutex.RUnlock()
 
 	comments, ok := commentsForMeTable[userID]
 	if !ok {
