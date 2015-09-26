@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS relations (
   `another` int NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `friendship` (`one`,`another`)
+  KEY `another_one` (`another`,`one`)
 ) DEFAULT CHARSET=utf8;
 
 -- DROP TABLE IF EXISTS profiles;
