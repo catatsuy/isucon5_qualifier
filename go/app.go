@@ -306,6 +306,25 @@ func isFriend2(friendsMap map[int]time.Time, userID int) bool {
 	return ok
 }
 
+var recentEntries []Entry = make([]Entry, 0, 1000)
+var lastRecentEntriesTime = time.Now()
+var lastRecentEntriesLock = mutex.Lock()
+
+func getRecentEntries() ([]Entry, error) {
+	if len(recentEntries) == 0 || time.Since(lastRecentEntriesTime).Millis() > 500 {
+		rows, err := db.Query(`SELECT * FROM entries ORDER BY created_at DESC LIMIT 1000`)
+		if err != nil {
+			return recentEntries, err
+		}
+		recentEntries2 = make([]Entry, 0, 1000)
+		for rows.Next() {
+			recentEntries2 = append(recentEntries, Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt})
+		}
+		recentEntries
+	}
+	return recentEntries, nil
+}
+
 func GetIndex(w http.ResponseWriter, r *http.Request) {
 	if !authenticated(w, r) {
 		return
