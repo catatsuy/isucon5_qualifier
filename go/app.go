@@ -299,6 +299,11 @@ func GetLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
+func isFriend2(friendsMap map[int]time.Time, userID int) bool {
+	_, ok := friendsMap[userID]
+	return ok
+}
+
 func GetIndex(w http.ResponseWriter, r *http.Request) {
 	if !authenticated(w, r) {
 		return
@@ -344,55 +349,7 @@ LIMIT 10`, user.ID)
 	}
 	rows.Close()
 
-	rows, err = db.Query(`SELECT * FROM entries ORDER BY created_at DESC LIMIT 1000`)
-	if err != sql.ErrNoRows {
-		checkErr(err)
-	}
-	entriesOfFriends := make([]Entry, 0, 10)
-	for rows.Next() {
-		var id, userID, private int
-		var body string
-		var createdAt time.Time
-		checkErr(rows.Scan(&id, &userID, &private, &body, &createdAt))
-		if !isFriend(w, r, userID) {
-			continue
-		}
-		entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt})
-		if len(entriesOfFriends) >= 10 {
-			break
-		}
-	}
-	rows.Close()
-
-	rows, err = db.Query(`SELECT * FROM comments ORDER BY created_at DESC LIMIT 1000`)
-	if err != sql.ErrNoRows {
-		checkErr(err)
-	}
-	commentsOfFriends := make([]Comment, 0, 10)
-	for rows.Next() {
-		c := Comment{}
-		checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt))
-		if !isFriend(w, r, c.UserID) {
-			continue
-		}
-		row := db.QueryRow(`SELECT * FROM entries WHERE id = ?`, c.EntryID)
-		var id, userID, private int
-		var body string
-		var createdAt time.Time
-		checkErr(row.Scan(&id, &userID, &private, &body, &createdAt))
-		entry := Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt}
-		if entry.Private {
-			if !permitted(w, r, entry.UserID) {
-				continue
-			}
-		}
-		commentsOfFriends = append(commentsOfFriends, c)
-		if len(commentsOfFriends) >= 10 {
-			break
-		}
-	}
-	rows.Close()
-
+	// フレンド一覧を取得
 	rows, err = db.Query(`SELECT * FROM relations WHERE one = ? OR another = ? ORDER BY created_at DESC`, user.ID, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
@@ -415,6 +372,57 @@ LIMIT 10`, user.ID)
 	friends := make([]Friend, 0, len(friendsMap))
 	for key, val := range friendsMap {
 		friends = append(friends, Friend{key, val})
+	}
+	rows.Close()
+
+	// エントリーを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
+	rows, err = db.Query(`SELECT * FROM entries ORDER BY created_at DESC LIMIT 1000`)
+	if err != sql.ErrNoRows {
+		checkErr(err)
+	}
+	entriesOfFriends := make([]Entry, 0, 10)
+	for rows.Next() {
+		var id, userID, private int
+		var body string
+		var createdAt time.Time
+		checkErr(rows.Scan(&id, &userID, &private, &body, &createdAt))
+		if !isFriend2(friendsMap, userID) {
+			continue
+		}
+		entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt})
+		if len(entriesOfFriends) >= 10 {
+			break
+		}
+	}
+	rows.Close()
+
+	// コメントを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
+	rows, err = db.Query(`SELECT * FROM comments ORDER BY created_at DESC LIMIT 1000`)
+	if err != sql.ErrNoRows {
+		checkErr(err)
+	}
+	commentsOfFriends := make([]Comment, 0, 10)
+	for rows.Next() {
+		c := Comment{}
+		checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt))
+		if !isFriend2(friendsMap, c.UserID) {
+			continue
+		}
+		row := db.QueryRow(`SELECT * FROM entries WHERE id = ?`, c.EntryID)
+		var id, userID, private int
+		var body string
+		var createdAt time.Time
+		checkErr(row.Scan(&id, &userID, &private, &body, &createdAt))
+		entry := Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt}
+		if entry.Private {
+			if !permitted(w, r, entry.UserID) {
+				continue
+			}
+		}
+		commentsOfFriends = append(commentsOfFriends, c)
+		if len(commentsOfFriends) >= 10 {
+			break
+		}
 	}
 	rows.Close()
 
