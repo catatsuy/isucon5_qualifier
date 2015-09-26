@@ -261,11 +261,11 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 		},
 		"split": strings.Split,
 		"getEntry": func(id int) Entry {
-			row := db.QueryRow(`SELECT * FROM entries WHERE id=?`, id)
+			row := db.QueryRow(`SELECT entries.id, entries.user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, SUBSTRING_INDEX(body, '\n', 2) as body FROM entries WHERE id=?`, id)
 			var entryID, userID, private int
-			var body string
+			var subject, body string
 			var createdAt time.Time
-			checkErr(row.Scan(&entryID, &userID, &private, &body, &createdAt))
+			checkErr(row.Scan(&entryID, &userID, &private, &subject, &body, &createdAt))
 			return Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt}
 		},
 		"numComments": func(id int) int {
