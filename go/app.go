@@ -405,10 +405,11 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 
 	entryIndex := ""
 	if len(friendIds) > 20 {
-	  entryIndex = "PRIMARY"
+	  entryIndex = "created_at"
 	} else {
 	  entryIndex = "user_id"
 	}
+	// fmt.Println(entryIndex)
 	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
 	if err != sql.ErrNoRows {
 		checkErr(err)
@@ -432,11 +433,12 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	// コメントを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
 	commentIndex := ""
 	if len(friendIds) > 20 {
-	  commentIndex = "PRIMARY"
+	  commentIndex = "created_at"
 	} else {
 	  commentIndex = "user_id"
 	}
 	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
+	// fmt.Println(query)
 	rows, err = db.Query(query)
 	if err != sql.ErrNoRows {
 		checkErr(err)
