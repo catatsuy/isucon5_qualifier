@@ -23,11 +23,13 @@ import (
 	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
+	redis "gopkg.in/redis.v3"
 )
 
 var (
 	db    *sql.DB
 	store *sessions.CookieStore
+	rd    *redis.Client
 )
 
 type User struct {
@@ -729,6 +731,11 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 
 func init() {
 	flag.Parse()
+
+	rd = redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   0,
+	})
 }
 
 var commentCh = make(chan Comment, 10000)
