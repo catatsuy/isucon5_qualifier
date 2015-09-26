@@ -741,7 +741,6 @@ var commentsForMeMutex = sync.Mutex{}
 func commentsForMeWorker() {
 	for {
 		comment := <-commentCh
-		fmt.Println(comment)
 		commentsForMeMutex.Lock()
 		_, ok := commentsForMeTable[comment.UserID]
 		if !ok {
@@ -878,7 +877,7 @@ func main() {
 	signal.Notify(sigchan, syscall.SIGINT)
 
 	go commentsForMeWorker()
-	//initCommentsForMe()
+	initCommentsForMe()
 
 	var li net.Listener
 	sock := "/dev/shm/server.sock"
