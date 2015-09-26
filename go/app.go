@@ -87,7 +87,7 @@ var (
 )
 
 var tport = flag.Uint("port", 0, "port to listen")
-var mysqlsock = flag.Bool("mysqlsock", false, "connect to mysql via unix domain socket")
+var mysqlsock = flag.Bool("mysqlsock", true, "connect to mysql via unix domain socket")
 
 func authenticate(w http.ResponseWriter, r *http.Request, email, passwd string) {
 	query := `SELECT u.id AS id, u.account_name AS account_name, u.nick_name AS nick_name, u.email AS email
