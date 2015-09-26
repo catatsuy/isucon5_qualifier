@@ -398,7 +398,8 @@ LIMIT 10`, user.ID)
 	rows.Close()
 
 	// コメントを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
-	rows, err = db.Query(`SELECT id, entry_id, user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, created_at FROM comments ORDER BY created_at DESC LIMIT 1000`)
+	query := fmt.Sprintf(`SELECT id, entry_id, user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, created_at FROM comments WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, strings.Join(friendIds, ","))
+	rows, err = db.Query(query)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
