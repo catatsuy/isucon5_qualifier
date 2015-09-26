@@ -66,6 +66,15 @@ type Comment struct {
 	CreatedAt time.Time
 }
 
+type CommentWithEntry struct {
+	ID        int
+	EntryID   int
+	UserID    int
+	Comment   string
+	CreatedAt time.Time
+	Entry Entry
+}
+
 type Friend struct {
 	ID        int
 	CreatedAt time.Time
@@ -443,9 +452,9 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
-	commentsOfFriends := make([]Comment, 0, 10)
+	commentsOfFriends := make([]CommentWithEntry, 0, 10)
 	for rows.Next() {
-		c := Comment{}
+		c := CommentWithEntry{}
 		var id, userID, private int
 		var subject string
 		var createdAt time.Time
@@ -454,6 +463,7 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		entry := Entry{id, userID, private == 1, subject, "", createdAt}
+		c.Entry = entry
 		if entry.Private {
 			if !permitted(w, r, entry.UserID) {
 				continue
@@ -477,7 +487,7 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 		Entries           []Entry
 		CommentsForMe     []Comment
 		EntriesOfFriends  []Entry
-		CommentsOfFriends []Comment
+		CommentsOfFriends []CommentWithEntry
 		Friends           []Friend
 		Footprints        []Footprint
 	}{
