@@ -23,11 +23,13 @@ import (
 	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
+	redis "gopkg.in/redis.v3"
 )
 
 var (
 	db    *sql.DB
 	store *sessions.CookieStore
+	rd    *redis.Client
 )
 
 type User struct {
@@ -188,12 +190,32 @@ func permitted(w http.ResponseWriter, r *http.Request, anotherID int) bool {
 	return isFriend(w, r, anotherID)
 }
 
+func footprintKey(userID int) string {
+	return fmt.Sprintf("footprint-%d", userID)
+}
+
 func markFootprint(w http.ResponseWriter, r *http.Request, id int) {
 	user := getCurrentUser(w, r)
 	if user.ID != id {
-		_, err := db.Exec(`INSERT INTO footprints (user_id,owner_id) VALUES (?,?)`, id, user.ID)
-		checkErr(err)
+		rd.ZAdd(footprintKey(id /*見られてる人*/), redis.Z{float64(time.Now().Unix()), user.ID /*見てる人*/})
+		//_, err := db.Exec(`INSERT INTO footprints (user_id,owner_id) VALUES (?,?)`, id, user.ID)
+		//checkErr(err)
 	}
+}
+
+func getFootprintsFromRedis(userID int, num int64) ([]Footprint, error) {
+	vals, err := rd.ZRevRangeWithScores(footprintKey(userID), 0, num).Result()
+	if err != nil {
+		return nil, err
+	}
+	footprints := make([]Footprint, 0, num)
+	for _, val := range vals {
+		t := time.Unix(int64(val.Score), 0)
+		viewerIDStr, _ := val.Member.(string)
+		viewerID, _ := strconv.Atoi(viewerIDStr)
+		footprints = append(footprints, Footprint{userID, viewerID, t, t})
+	}
+	return footprints, nil
 }
 
 func myHandler(fn func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
@@ -412,22 +434,10 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	rows, err = db.Query(`SELECT user_id, owner_id, DATE(created_at) AS date, MAX(created_at) AS updated
-FROM footprints
-WHERE user_id = ?
-GROUP BY user_id, owner_id, DATE(created_at)
-ORDER BY updated DESC
-LIMIT 10`, user.ID)
-	if err != sql.ErrNoRows {
+	footprints, err := getFootprintsFromRedis(user.ID, 10)
+	if err != nil {
 		checkErr(err)
 	}
-	footprints := make([]Footprint, 0, 10)
-	for rows.Next() {
-		fp := Footprint{}
-		checkErr(rows.Scan(&fp.UserID, &fp.OwnerID, &fp.CreatedAt, &fp.Updated))
-		footprints = append(footprints, fp)
-	}
-	rows.Close()
 
 	render(w, r, http.StatusOK, "index.html", struct {
 		User              User
@@ -653,22 +663,10 @@ func GetFootprints(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := getCurrentUser(w, r)
-	footprints := make([]Footprint, 0, 50)
-	rows, err := db.Query(`SELECT user_id, owner_id, DATE(created_at) AS date, MAX(created_at) as updated
-FROM footprints
-WHERE user_id = ?
-GROUP BY user_id, owner_id, DATE(created_at)
-ORDER BY updated DESC
-LIMIT 50`, user.ID)
-	if err != sql.ErrNoRows {
+	footprints, err := getFootprintsFromRedis(user.ID, 50)
+	if err != nil {
 		checkErr(err)
 	}
-	for rows.Next() {
-		fp := Footprint{}
-		checkErr(rows.Scan(&fp.UserID, &fp.OwnerID, &fp.CreatedAt, &fp.Updated))
-		footprints = append(footprints, fp)
-	}
-	rows.Close()
 	render(w, r, http.StatusOK, "footprints.html", struct{ Footprints []Footprint }{footprints})
 }
 func GetFriends(w http.ResponseWriter, r *http.Request) {
@@ -729,6 +727,11 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 
 func init() {
 	flag.Parse()
+
+	rd = redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   0,
+	})
 }
 
 var commentCh = make(chan Comment, 10000)
