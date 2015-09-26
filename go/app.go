@@ -187,11 +187,30 @@ func permitted(w http.ResponseWriter, r *http.Request, anotherID int) bool {
 	return isFriend(w, r, anotherID)
 }
 
+type MarkFootprint struct {
+	ID     int
+	UserID int
+}
+
+var mfch = make(chan *MarkFootprint, 100)
+
 func markFootprint(w http.ResponseWriter, r *http.Request, id int) {
 	user := getCurrentUser(w, r)
 	if user.ID != id {
-		_, err := db.Exec(`INSERT INTO footprints (user_id,owner_id) VALUES (?,?)`, id, user.ID)
-		checkErr(err)
+		mfch <- &MarkFootprint{ID: id, UserID: user.ID}
+	}
+}
+
+func markFootprintWorker() {
+	interval := time.Tick(1 * time.Second)
+	for {
+		<-interval
+		for {
+			mf := <-mfch
+			_, err := db.Exec(`INSERT INTO footprints (user_id,owner_id) VALUES (?,?)`, mf.ID, mf.UserID)
+			fmt.Println(mf.ID, mf.UserID)
+			checkErr(err)
+		}
 	}
 }
 
@@ -792,6 +811,9 @@ func main() {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
 	defer db.Close()
+
+	// あしあと用のワーカー
+	go markFootprintWorker()
 
 	store = sessions.NewCookieStore([]byte(ssecret))
 
