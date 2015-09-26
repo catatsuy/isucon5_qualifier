@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"flag"
+	"fmt"
 	"html/template"
 	"log"
 	"net"
@@ -86,6 +87,7 @@ var (
 )
 
 var tport = flag.Uint("port", 0, "port to listen")
+var mysqlsock = flag.Bool("mysqlsock", false, "connect to mysql via unix domain socket")
 
 func authenticate(w http.ResponseWriter, r *http.Request, email, passwd string) {
 	query := `SELECT u.id AS id, u.account_name AS account_name, u.nick_name AS nick_name, u.email AS email
@@ -757,7 +759,27 @@ func main() {
 		ssecret = "beermoris"
 	}
 
-	db, err = sql.Open("mysql", user+":"+password+"@tcp("+host+":"+strconv.Itoa(port)+")/"+dbname+"?loc=Local&parseTime=true")
+	var dsn string
+	if *mysqlsock {
+		dsn = fmt.Sprintf(
+			"%s:%s@unix(%s)/%s?parseTime=true&loc=Local",
+			user,
+			password,
+			"/var/lib/mysql/mysql.sock",
+			dbname,
+		)
+
+	} else {
+		dsn = fmt.Sprintf(
+			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
+			user,
+			password,
+			"localhost",
+			port,
+			dbname,
+		)
+	}
+	db, err = sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
