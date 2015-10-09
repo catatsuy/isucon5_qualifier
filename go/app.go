@@ -24,7 +24,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	redis "gopkg.in/redis.v3"
-	proxy "github.com/shogo82148/go-sql-proxy"
+	_ "github.com/walf443/go-sql-tracer"
 )
 
 var (
@@ -86,14 +86,6 @@ type Footprint struct {
 	OwnerID   int
 	CreatedAt time.Time
 	Updated   time.Time
-}
-
-type MyLog struct {}
-
-func (*MyLog) Output(n int, out string) error {
-	var err error;
-	log.Println(out)
-	return err
 }
 
 var prefs = []string{"未入力",
@@ -889,12 +881,10 @@ func main() {
 			dbname,
 		)
 	}
-	logger := new(MyLog)
-	sql.Register("mysql-proxy", proxy.NewTraceProxy(&mysql.MySQLDriver{}, logger))
 	if *mysqlsock {
 	  db, err = sql.Open("mysql", dsn)
 	} else {
-	  db, err = sql.Open("mysql-proxy", dsn)
+	  db, err = sql.Open("mysql-trace", dsn)
 	}
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
