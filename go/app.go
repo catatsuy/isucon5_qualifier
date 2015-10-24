@@ -250,12 +250,14 @@ func getUserFromAccount(w http.ResponseWriter, name string) *User {
 
 func isFriend(w http.ResponseWriter, r *http.Request, anotherID int) bool {
 	session := getSession(w, r)
-	id := session.Values["user_id"]
-	row := db.QueryRow(`SELECT COUNT(1) AS cnt FROM relations WHERE (one = ? AND another = ?)`, id, anotherID)
-	cnt := new(int)
-	err := row.Scan(cnt)
-	checkErr(err)
-	return *cnt > 0
+	id := session.Values["user_id"].(int)
+	for _, rel := range friendsForMe.Get(id) {
+		if rel.anotherID == anotherID {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isFriendAccount(w http.ResponseWriter, r *http.Request, name string) bool {
@@ -477,7 +479,7 @@ LIMIT 10`, user.ID)
 
 	stopwatch.Watch("After Comment")
 
-	relations := friendsForMe[user.ID]
+	relations := friendsForMe.Get(user.ID)
 	friendsMap := make(map[int]time.Time)
 	friendIds := make([]string, 0)
 	for _, r := range relations {
@@ -853,14 +855,14 @@ func PostFriends(w http.ResponseWriter, r *http.Request) {
 		r1.anotherID = another.ID
 		r1.createdAt = time.Now()
 
-		friendsForMe[user.ID] = append(friendsForMe[user.ID], r1)
+		friendsForMe.Set(user.ID, r1)
 
 		r2 := Relation{}
 		r2.oneID = user.ID
 		r2.anotherID = another.ID
 		r2.createdAt = time.Now()
 
-		friendsForMe[user.ID] = append(friendsForMe[user.ID], r2)
+		friendsForMe.Set(user.ID, r2)
 
 		checkErr(err)
 		http.Redirect(w, r, "/friends", http.StatusSeeOther)
@@ -887,10 +889,40 @@ func init() {
 	})
 }
 
+type cacheRelation struct {
+	sync.RWMutex
+	items map[int][]Relation
+}
+
+func NewCacheRelation() *cacheRelation {
+	m := make(map[int][]Relation)
+	c := &cacheRelation{
+		items: m,
+	}
+	return c
+}
+
+func (c *cacheRelation) Set(key int, value Relation) {
+	c.Lock()
+	c.items[key] = append(c.items[key], value)
+	c.Unlock()
+}
+
+func (c *cacheRelation) Get(key int) []Relation {
+	c.RLock()
+	v, found := c.items[key]
+	c.RUnlock()
+	if found {
+		return v
+	} else {
+		return make([]Relation, 0)
+	}
+}
+
 var commentCh = make(chan Comment, 10000)
 var commentsForMeTable = make(map[int][]Comment)
 var commentsForMeMutex = sync.Mutex{}
-var friendsForMe = make(map[int][]Relation)
+var friendsForMe = NewCacheRelation()
 
 func commentsForMeWorker() {
 	for {
@@ -957,7 +989,7 @@ func initRelations() {
 		if err != nil {
 			panic(err)
 		}
-		friendsForMe[r.oneID] = append(friendsForMe[r.oneID], r)
+		friendsForMe.Set(r.oneID, r)
 	}
 	fmt.Println("finish initRelations")
 }
