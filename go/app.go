@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -351,6 +352,12 @@ func isFriend2(friendsMap map[int]time.Time, userID int) bool {
 	return ok
 }
 
+type MyluaResponse struct {
+	OK      bool   `json:"ok"`
+	Data    []int  `json:"data"`
+	Message string `json:"message"`
+}
+
 func GetIndex(w http.ResponseWriter, r *http.Request) {
 	stopwatch.Watch("GET /")
 	if !authenticated(w, r) {
@@ -408,7 +415,7 @@ LIMIT 10`, user.ID)
 	stopwatch.Watch("After Comment")
 
 	// フレンド一覧を取得
-	rows, err = db.Query(`SELECT * FROM relations WHERE one = ?`, user.ID)
+	rows, err = db.Query(`SELECT * FROM relations WHERE one = ? ORDER BY another ASC`, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -437,71 +444,180 @@ LIMIT 10`, user.ID)
 
 	stopwatch.Watch("After Relation")
 
-	entryIndex := ""
-	if len(friendIds) > 20 {
-		entryIndex = "created_at"
-	} else {
-		entryIndex = "user_id"
-	}
-	// fmt.Println(entryIndex)
-	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
-	if err != sql.ErrNoRows {
-		checkErr(err)
-	}
 	entriesOfFriends := make([]Entry, 0, 10)
-	for rows.Next() {
-		var id, userID, private int
-		var subject string
-		var createdAt time.Time
-		checkErr(rows.Scan(&id, &userID, &private, &subject, &createdAt))
-		if !isFriend2(friendsMap, userID) {
-			continue
+
+	if *mysqlsock {
+		// production
+		row := db.QueryRow(myluaQuery(), fmt.Sprintf(`{"table":"entries","limit":%d,"offset":%d,"users":[%d]}`, 10, 0, strings.Join(friendIds, ",")))
+
+		var response string
+		err = row.Scan(&response)
+		if err != nil {
+			checkErr(err)
 		}
-		entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, subject, "", createdAt})
-		if len(entriesOfFriends) >= 10 {
-			break
+
+		var myluaResponse MyluaResponse
+		dec := json.NewDecoder(strings.NewReader(response))
+		err = dec.Decode(myluaResponse)
+		if err != nil {
+			checkErr(err)
 		}
+		if !myluaResponse.OK {
+			checkErr(errors.New(myluaResponse.Message))
+		}
+		var entryIDs []string
+		for _, id := range myluaResponse.Data {
+			entryIDs = append(entryIDs, strconv.Itoa(id))
+		}
+
+		rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries WHERE id IN (%s) ORDER BY created_at DESC`, strings.Join(entryIDs, ",")))
+		if err != sql.ErrNoRows {
+			checkErr(err)
+		}
+
+		for rows.Next() {
+			var id, userID, private int
+			var subject string
+			var createdAt time.Time
+			checkErr(rows.Scan(&id, &userID, &private, &subject, &createdAt))
+			if !isFriend2(friendsMap, userID) {
+				continue
+			}
+			entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, subject, "", createdAt})
+			if len(entriesOfFriends) >= 10 {
+				break
+			}
+		}
+		rows.Close()
+
+	} else {
+		// development
+		entryIndex := ""
+		if len(friendIds) > 20 {
+			entryIndex = "created_at"
+		} else {
+			entryIndex = "user_id"
+		}
+		// fmt.Println(entryIndex)
+
+		rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
+		if err != sql.ErrNoRows {
+			checkErr(err)
+		}
+
+		for rows.Next() {
+			var id, userID, private int
+			var subject string
+			var createdAt time.Time
+			checkErr(rows.Scan(&id, &userID, &private, &subject, &createdAt))
+			if !isFriend2(friendsMap, userID) {
+				continue
+			}
+			entriesOfFriends = append(entriesOfFriends, Entry{id, userID, private == 1, subject, "", createdAt})
+			if len(entriesOfFriends) >= 10 {
+				break
+			}
+		}
+		rows.Close()
 	}
-	rows.Close()
 
 	stopwatch.Watch("After entries")
 
 	// コメントを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
-	commentIndex := ""
-	if len(friendIds) > 20 {
-		commentIndex = "created_at"
-	} else {
-		commentIndex = "user_id"
-	}
-	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
-	// fmt.Println(query)
-	rows, err = db.Query(query)
-	if err != sql.ErrNoRows {
-		checkErr(err)
-	}
 	commentsOfFriends := make([]CommentWithEntry, 0, 10)
-	for rows.Next() {
-		c := CommentWithEntry{}
-		var id, userID, private int
-		var subject string
-		var createdAt time.Time
-		checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt, &id, &userID, &private, &subject, &createdAt))
-		if !isFriend2(friendsMap, c.UserID) {
-			continue
+
+	if *mysqlsock {
+		// production
+		row := db.QueryRow(myluaQuery(), fmt.Sprintf(`{"table":"comments","limit":%d,"offset":%d,"users":[%d]}`, 10, 0, strings.Join(friendIds, ",")))
+
+		var response string
+		err = row.Scan(&response)
+		if err != nil {
+			checkErr(err)
 		}
-		entry := Entry{id, userID, private == 1, subject, "", createdAt}
-		c.Entry = entry
-		if entry.Private {
-			if !permitted(w, r, entry.UserID) {
+
+		var myluaResponse MyluaResponse
+		dec := json.NewDecoder(strings.NewReader(response))
+		err = dec.Decode(myluaResponse)
+		if err != nil {
+			checkErr(err)
+		}
+		if !myluaResponse.OK {
+			checkErr(errors.New(myluaResponse.Message))
+		}
+		var commentIDs []string
+		for _, id := range myluaResponse.Data {
+			commentIDs = append(commentIDs, strconv.Itoa(id))
+		}
+
+		query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c JOIN entries e ON c.entry_id = e.id WHERE c.id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, strings.Join(commentIDs, ","))
+		rows, err = db.Query(query)
+		if err != sql.ErrNoRows {
+			checkErr(err)
+		}
+		for rows.Next() {
+			c := CommentWithEntry{}
+			var id, userID, private int
+			var subject string
+			var createdAt time.Time
+			checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt, &id, &userID, &private, &subject, &createdAt))
+			if !isFriend2(friendsMap, c.UserID) {
 				continue
 			}
+			entry := Entry{id, userID, private == 1, subject, "", createdAt}
+			c.Entry = entry
+			if entry.Private {
+				if !permitted(w, r, entry.UserID) {
+					continue
+				}
+			}
+			commentsOfFriends = append(commentsOfFriends, c)
+			if len(commentsOfFriends) >= 10 {
+				break
+			}
 		}
-		commentsOfFriends = append(commentsOfFriends, c)
-		if len(commentsOfFriends) >= 10 {
-			break
+		rows.Close()
+		if err != sql.ErrNoRows {
+			checkErr(err)
 		}
+
+	} else {
+		// development
+		commentIndex := ""
+		if len(friendIds) > 20 {
+			commentIndex = "created_at"
+		} else {
+			commentIndex = "user_id"
+		}
+		query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
+		// fmt.Println(query)
+		rows, err = db.Query(query)
+		if err != sql.ErrNoRows {
+			checkErr(err)
+		}
+		for rows.Next() {
+			c := CommentWithEntry{}
+			var id, userID, private int
+			var subject string
+			var createdAt time.Time
+			checkErr(rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt, &id, &userID, &private, &subject, &createdAt))
+			if !isFriend2(friendsMap, c.UserID) {
+				continue
+			}
+			entry := Entry{id, userID, private == 1, subject, "", createdAt}
+			c.Entry = entry
+			if entry.Private {
+				if !permitted(w, r, entry.UserID) {
+					continue
+				}
+			}
+			commentsOfFriends = append(commentsOfFriends, c)
+			if len(commentsOfFriends) >= 10 {
+				break
+			}
+		}
+		rows.Close()
 	}
-	rows.Close()
 
 	stopwatch.Watch("After Friend Comments")
 
@@ -933,6 +1049,105 @@ func main() {
 	<-sigchan
 
 	// log.Fatal(http.ListenAndServe(":8080", r))
+}
+
+func myluaQuery() string {
+	return `
+    mylua.set_memory_limit_bytes(50 * 1024 * 1024)
+    function timeline(mylua)
+        local db = "isucon5q"
+        local tbl = mylua.arg.table
+        local index = "user_id_id"
+        local f_uid = "user_id"
+        local f_sid = "id"
+        local offset = mylua.arg.offset
+        local limit_plus_offset = mylua.arg.limit + offset
+        local min = 0
+        local max = 2 ^ 31 - 1
+        local users = mylua.arg.users
+        local rkey = mylua.HA_READ_PREFIX_LAST_OR_PREV
+        local arg_sid = max
+        local heap = {}
+        local return_array = {}
+        local heap_count = 0
+        mylua.init_table(db, tbl, index, f_uid, f_sid)
+
+        for uid_i, arg_uid in ipairs(users) do
+            mylua.index_read_map(rkey, arg_uid, arg_sid)
+            while true do
+                local uid = mylua.val_int(f_uid)
+                if uid == arg_uid then else break end
+                local sid = mylua.val_int(f_sid)
+
+                if heap_count == limit_plus_offset and heap[1] and heap[1] > sid then break end
+
+                if heap_count < limit_plus_offset then
+                    heap_count = heap_count + 1
+                    heap[heap_count] = sid
+                    local child = heap_count
+                    local parent = math.floor(child / 2)
+                    while heap[parent] and heap[child] < heap[parent] do
+                        local temp = heap[parent]
+                        heap[parent] = heap[child]
+                        heap[child] = temp
+                        child = parent
+                        parent = math.floor(child / 2)
+                    end
+                else
+                    heap[1] = sid
+                    local parent = 1
+                    local child = parent * 2
+                    while child <= heap_count do
+                        local right = child + 1
+                        if heap[right] and heap[child] > heap[right] then
+                            child = right
+                        end
+                        if heap[parent] > heap[child] then
+                            local temp = heap[child]
+                            heap[child] = heap[parent]
+                            heap[parent] = temp
+                        else
+                            break
+                        end
+                        parent = child
+                        child = parent * 2
+                    end
+                end
+
+                local re = mylua.index_prev()
+                if re == 0 then else break end
+            end
+        end
+
+        while heap_count > offset do
+            table.insert(return_array, heap[1])
+
+            heap[1] = heap[heap_count]
+            heap[heap_count] = nil
+            heap_count = heap_count - 1
+            local parent = 1
+            local child = parent * 2
+            while child <= heap_count do
+                local right = child + 1
+                if heap[right] and heap[child] > heap[right] then
+                    child = right
+                end
+                if heap[parent] > heap[child] then
+                    local temp = heap[child]
+                    heap[child] = heap[parent]
+                    heap[parent] = temp
+                else
+                    break
+                end
+                parent = child
+                child = parent * 2
+            end
+        end
+        return return_array
+    end
+
+    return timeline(mylua)
+`
 }
 
 func checkErr(err error) {
