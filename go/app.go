@@ -328,6 +328,10 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 			checkErr(row.Scan(&n))
 			return n
 		},
+		"watch": func(name string) string {
+			stopwatch.Watch(name)
+			return ""
+		},
 	}
 	tpl := template.Must(template.New(file).Funcs(fmap).ParseFiles(getTemplatePath(file), getTemplatePath("header.html")))
 	w.WriteHeader(status)
