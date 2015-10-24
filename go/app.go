@@ -26,10 +26,25 @@ import (
 )
 
 var (
-	db    *sql.DB
-	store *sessions.CookieStore
-	rd    *redis.Client
+	db1      *sql.DB
+	db2      *sql.DB
+	dbSelect bool
+	store    *sessions.CookieStore
+	rd       *redis.Client
 )
+
+func dbWrite() *sql.DB {
+	return db1
+}
+
+func dbRandom() *sql.DB {
+	dbSelect = !dbSelect
+	if dbSelect {
+		return db1
+	} else {
+		return db2
+	}
+}
 
 type User struct {
 	ID          int
@@ -99,13 +114,14 @@ var (
 
 var tport = flag.Uint("port", 0, "port to listen")
 var mysqlsock = flag.Bool("mysqlsock", true, "connect to mysql via unix domain socket")
+var production = flag.Bool("production", true, "is production")
 
 func authenticate(w http.ResponseWriter, r *http.Request, email, passwd string) {
 	query := `SELECT u.id AS id, u.account_name AS account_name, u.nick_name AS nick_name, u.email AS email
 FROM users u
 JOIN salts s ON u.id = s.user_id
 WHERE u.email = ? AND u.passhash = SHA2(CONCAT(?, s.salt), 512)`
-	row := db.QueryRow(query, email, passwd)
+	row := dbRandom().QueryRow(query, email, passwd)
 	user := User{}
 	err := row.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email)
 	if err != nil {
@@ -159,7 +175,7 @@ func getUser(w http.ResponseWriter, userID int) *User {
 func initAllUsers() {
 	allUsers = make(map[int]User, 50000)
 	fmt.Println("start initAllUsers")
-	rows, err := db.Query(`SELECT * FROM users`)
+	rows, err := dbRandom().Query(`SELECT * FROM users`)
 	if err != nil && err != sql.ErrNoRows {
 		panic(err)
 	}
@@ -176,7 +192,7 @@ func initAllUsers() {
 }
 
 func getUserFromAccount(w http.ResponseWriter, name string) *User {
-	row := db.QueryRow(`SELECT * FROM users WHERE account_name = ?`, name)
+	row := dbRandom().QueryRow(`SELECT * FROM users WHERE account_name = ?`, name)
 	user := User{}
 	err := row.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email, new(string))
 	if err == sql.ErrNoRows {
@@ -189,7 +205,7 @@ func getUserFromAccount(w http.ResponseWriter, name string) *User {
 func isFriend(w http.ResponseWriter, r *http.Request, anotherID int) bool {
 	session := getSession(w, r)
 	id := session.Values["user_id"]
-	row := db.QueryRow(`SELECT COUNT(1) AS cnt FROM relations WHERE (one = ? AND another = ?) OR (one = ? AND another = ?)`, id, anotherID, anotherID, id)
+	row := dbRandom().QueryRow(`SELECT COUNT(1) AS cnt FROM relations WHERE (one = ? AND another = ?) OR (one = ? AND another = ?)`, id, anotherID, anotherID, id)
 	cnt := new(int)
 	err := row.Scan(cnt)
 	checkErr(err)
@@ -220,7 +236,7 @@ func markFootprint(w http.ResponseWriter, r *http.Request, id int) {
 	user := getCurrentUser(w, r)
 	if user.ID != id {
 		rd.ZAdd(footprintKey(id /*見られてる人*/), redis.Z{float64(time.Now().Unix()), user.ID /*見てる人*/})
-		//_, err := db.Exec(`INSERT INTO footprints (user_id,owner_id) VALUES (?,?)`, id, user.ID)
+		//_, err := dbRandom().Exec(`INSERT INTO footprints (user_id,owner_id) VALUES (?,?)`, id, user.ID)
 		//checkErr(err)
 	}
 }
@@ -306,7 +322,7 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 		},
 		"split": strings.Split,
 		"getEntry": func(id int) Entry {
-			row := db.QueryRow(`SELECT entries.id, entries.user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries WHERE id=?`, id)
+			row := dbRandom().QueryRow(`SELECT entries.id, entries.user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries WHERE id=?`, id)
 			var entryID, userID, private int
 			var subject string
 			var createdAt time.Time
@@ -314,7 +330,7 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 			return Entry{id, userID, private == 1, subject, "", createdAt}
 		},
 		"numComments": func(id int) int {
-			row := db.QueryRow(`SELECT COUNT(*) AS c FROM comments WHERE entry_id = ?`, id)
+			row := dbRandom().QueryRow(`SELECT COUNT(*) AS c FROM comments WHERE entry_id = ?`, id)
 			var n int
 			checkErr(row.Scan(&n))
 			return n
@@ -357,13 +373,13 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	user := getCurrentUser(w, r)
 
 	prof := Profile{}
-	row := db.QueryRow(`SELECT * FROM profiles WHERE user_id = ?`, user.ID)
+	row := dbRandom().QueryRow(`SELECT * FROM profiles WHERE user_id = ?`, user.ID)
 	err := row.Scan(&prof.UserID, &prof.FirstName, &prof.LastName, &prof.Sex, &prof.Birthday, &prof.Pref, &prof.UpdatedAt)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
 
-	rows, err := db.Query(`SELECT * FROM entries WHERE user_id = ? ORDER BY created_at LIMIT 5`, user.ID)
+	rows, err := dbRandom().Query(`SELECT * FROM entries WHERE user_id = ? ORDER BY created_at LIMIT 5`, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -377,7 +393,7 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, c.comment AS comment, c.created_at AS created_at
+	rows, err = dbRandom().Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, c.comment AS comment, c.created_at AS created_at
 FROM comments c
 JOIN entries e ON c.entry_id = e.id
 WHERE e.user_id = ?
@@ -395,7 +411,7 @@ LIMIT 10`, user.ID)
 	rows.Close()
 
 	// フレンド一覧を取得
-	rows, err = db.Query(`SELECT * FROM relations WHERE one = ? OR another = ? ORDER BY created_at DESC`, user.ID, user.ID)
+	rows, err = dbRandom().Query(`SELECT * FROM relations WHERE one = ? OR another = ? ORDER BY created_at DESC`, user.ID, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -429,7 +445,7 @@ LIMIT 10`, user.ID)
 		entryIndex = "user_id"
 	}
 	// fmt.Println(entryIndex)
-	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
+	rows, err = dbRandom().Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -458,7 +474,7 @@ LIMIT 10`, user.ID)
 	}
 	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
 	// fmt.Println(query)
-	rows, err = db.Query(query)
+	rows, err = dbRandom().Query(query)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -512,7 +528,7 @@ func GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	account := mux.Vars(r)["account_name"]
 	owner := getUserFromAccount(w, account)
-	row := db.QueryRow(`SELECT * FROM profiles WHERE user_id = ?`, owner.ID)
+	row := dbRandom().QueryRow(`SELECT * FROM profiles WHERE user_id = ?`, owner.ID)
 	prof := Profile{}
 	err := row.Scan(&prof.UserID, &prof.FirstName, &prof.LastName, &prof.Sex, &prof.Birthday, &prof.Pref, &prof.UpdatedAt)
 	if err != sql.ErrNoRows {
@@ -524,7 +540,7 @@ func GetProfile(w http.ResponseWriter, r *http.Request) {
 	} else {
 		query = `SELECT * FROM entries WHERE user_id = ? AND private=0 ORDER BY created_at LIMIT 5`
 	}
-	rows, err := db.Query(query, owner.ID)
+	rows, err := dbRandom().Query(query, owner.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -568,7 +584,7 @@ WHERE user_id = ?`
 	lastName := r.FormValue("last_name")
 	sex := r.FormValue("sex")
 	pref := r.FormValue("pref")
-	_, err := db.Exec(query, firstName, lastName, sex, birth, pref, user.ID)
+	_, err := dbWrite().Exec(query, firstName, lastName, sex, birth, pref, user.ID)
 	checkErr(err)
 	// TODO should escape the account name?
 	http.Redirect(w, r, "/profile/"+account, http.StatusSeeOther)
@@ -587,7 +603,7 @@ func ListEntries(w http.ResponseWriter, r *http.Request) {
 	} else {
 		query = `SELECT * FROM entries WHERE user_id = ? AND private=0 ORDER BY created_at DESC LIMIT 20`
 	}
-	rows, err := db.Query(query, owner.ID)
+	rows, err := dbRandom().Query(query, owner.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -616,7 +632,7 @@ func GetEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entryID := mux.Vars(r)["entry_id"]
-	row := db.QueryRow(`SELECT * FROM entries WHERE id = ?`, entryID)
+	row := dbRandom().QueryRow(`SELECT * FROM entries WHERE id = ?`, entryID)
 	var id, userID, private int
 	var body string
 	var createdAt time.Time
@@ -632,7 +648,7 @@ func GetEntry(w http.ResponseWriter, r *http.Request) {
 			checkErr(ErrPermissionDenied)
 		}
 	}
-	rows, err := db.Query(`SELECT * FROM comments WHERE entry_id = ?`, entry.ID)
+	rows, err := dbRandom().Query(`SELECT * FROM comments WHERE entry_id = ?`, entry.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -670,7 +686,7 @@ func PostEntry(w http.ResponseWriter, r *http.Request) {
 	} else {
 		private = 1
 	}
-	_, err := db.Exec(`INSERT INTO entries (user_id, private, body) VALUES (?,?,?)`, user.ID, private, title+"\n"+content)
+	_, err := dbWrite().Exec(`INSERT INTO entries (user_id, private, body) VALUES (?,?,?)`, user.ID, private, title+"\n"+content)
 	checkErr(err)
 	http.Redirect(w, r, "/diary/entries/"+user.AccountName, http.StatusSeeOther)
 }
@@ -681,7 +697,7 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entryID := mux.Vars(r)["entry_id"]
-	row := db.QueryRow(`SELECT * FROM entries WHERE id = ?`, entryID)
+	row := dbRandom().QueryRow(`SELECT * FROM entries WHERE id = ?`, entryID)
 	var id, userID, private int
 	var body string
 	var createdAt time.Time
@@ -700,7 +716,7 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 	}
 	user := getCurrentUser(w, r)
 
-	_, err = db.Exec(`INSERT INTO comments (entry_id, user_id, comment) VALUES (?,?,?)`, entry.ID, user.ID, r.FormValue("comment"))
+	_, err = dbWrite().Exec(`INSERT INTO comments (entry_id, user_id, comment) VALUES (?,?,?)`, entry.ID, user.ID, r.FormValue("comment"))
 	checkErr(err)
 	http.Redirect(w, r, "/diary/entry/"+strconv.Itoa(entry.ID), http.StatusSeeOther)
 }
@@ -723,7 +739,7 @@ func GetFriends(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := getCurrentUser(w, r)
-	rows, err := db.Query(`SELECT * FROM relations WHERE one = ? OR another = ? ORDER BY created_at DESC`, user.ID, user.ID)
+	rows, err := dbRandom().Query(`SELECT * FROM relations WHERE one = ? OR another = ? ORDER BY created_at DESC`, user.ID, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -759,17 +775,17 @@ func PostFriends(w http.ResponseWriter, r *http.Request) {
 	anotherAccount := mux.Vars(r)["account_name"]
 	if !isFriendAccount(w, r, anotherAccount) {
 		another := getUserFromAccount(w, anotherAccount)
-		_, err := db.Exec(`INSERT INTO relations (one, another) VALUES (?,?), (?,?)`, user.ID, another.ID, another.ID, user.ID)
+		_, err := dbWrite().Exec(`INSERT INTO relations (one, another) VALUES (?,?), (?,?)`, user.ID, another.ID, another.ID, user.ID)
 		checkErr(err)
 		http.Redirect(w, r, "/friends", http.StatusSeeOther)
 	}
 }
 
 func GetInitialize(w http.ResponseWriter, r *http.Request) {
-	db.Exec("DELETE FROM relations WHERE id > 500000")
-	db.Exec("DELETE FROM footprints WHERE id > 500000")
-	db.Exec("DELETE FROM entries WHERE id > 500000")
-	db.Exec("DELETE FROM comments WHERE id > 1500000")
+	dbWrite().Exec("DELETE FROM relations WHERE id > 500000")
+	dbWrite().Exec("DELETE FROM footprints WHERE id > 500000")
+	dbWrite().Exec("DELETE FROM entries WHERE id > 500000")
+	dbWrite().Exec("DELETE FROM comments WHERE id > 1500000")
 	initAllUsers()
 }
 
@@ -805,9 +821,10 @@ func main() {
 		ssecret = "beermoris"
 	}
 
-	var dsn string
-	if *mysqlsock {
-		dsn = fmt.Sprintf(
+	var dsn1 string
+	var dsn2 string
+	if *production {
+		dsn1 = fmt.Sprintf(
 			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
 			user,
 			password,
@@ -815,9 +832,24 @@ func main() {
 			port,
 			dbname,
 		)
-
+		dsn2 = fmt.Sprintf(
+			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
+			user,
+			password,
+			"instance-2",
+			port,
+			dbname,
+		)
 	} else {
-		dsn = fmt.Sprintf(
+		dsn1 = fmt.Sprintf(
+			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
+			user,
+			password,
+			"localhost",
+			port,
+			dbname,
+		)
+		dsn2 = fmt.Sprintf(
 			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
 			user,
 			password,
@@ -826,13 +858,18 @@ func main() {
 			dbname,
 		)
 	}
-	db, err = sql.Open("mysql", dsn)
+	db1, err = sql.Open("mysql", dsn1)
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
-	defer db.Close()
+	db2, err = sql.Open("mysql", dsn2)
+	if err != nil {
+		log.Fatalf("Failed to connect to DB: %s.", err.Error())
+	}
+	defer db1.Close()
+	defer db2.Close()
 
-	if *mysqlsock {
+	if *production {
 		rd = redis.NewClient(&redis.Options{
 			Network: "tcp",
 			Addr:    "instance-1:6379",
@@ -840,8 +877,8 @@ func main() {
 		})
 	} else {
 		rd = redis.NewClient(&redis.Options{
-			Network: "unix",
-			Addr:    "/tmp/redis.sock",
+			Network: "tcp",
+			Addr:    "localhost:6379",
 			DB:      0,
 		})
 	}
