@@ -408,7 +408,7 @@ LIMIT 10`, user.ID)
 	stopwatch.Watch("After Comment")
 
 	// フレンド一覧を取得
-	rows, err = db.Query(`SELECT * FROM relations WHERE one = ? ORDER BY created_at DESC`, user.ID)
+	rows, err = db.Query(`SELECT * FROM relations WHERE one = ?`, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
