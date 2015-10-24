@@ -106,6 +106,45 @@ var (
 	ErrContentNotFound  = errors.New("Content not found.")
 )
 
+type cacheSlice struct {
+	sync.RWMutex
+	items map[int]int
+}
+
+func NewCacheSlice() *cacheSlice {
+	m := make(map[int]int)
+	c := &cacheSlice{
+		items: m,
+	}
+	return c
+}
+
+func (c *cacheSlice) Set(key int, value int) {
+	c.Lock()
+	c.items[key] = value
+	c.Unlock()
+}
+
+func (c *cacheSlice) Get(key int) (int, bool) {
+	c.RLock()
+	v, found := c.items[key]
+	c.RUnlock()
+	return v, found
+}
+
+func (c *cacheSlice) Incr(key int, n int) {
+	c.Lock()
+	v, found := c.items[key]
+	if found {
+		c.items[key] = v + n
+	} else {
+		c.items[key] = n
+	}
+	c.Unlock()
+}
+
+var ecCache = NewCacheSlice()
+
 var tport = flag.Uint("port", 0, "port to listen")
 var mysqlsock = flag.Bool("mysqlsock", true, "connect to mysql via unix domain socket")
 
@@ -182,6 +221,20 @@ func initAllUsers() {
 	}
 	rows.Close()
 	fmt.Println("finish initAllUsers")
+}
+
+func initNumComments() {
+	rows, err := db.Query(`SELECT entry_id, COUNT(*) AS c FROM comments GROUP BY entry_id`)
+	if err != sql.ErrNoRows {
+		checkErr(err)
+	}
+
+	for rows.Next() {
+		var entryID, c int
+		checkErr(rows.Scan(&entryID, &c))
+		ecCache.Set(entryID, c)
+	}
+	rows.Close()
 }
 
 func getUserFromAccount(w http.ResponseWriter, name string) *User {
@@ -323,10 +376,7 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 			return Entry{id, userID, private == 1, subject, "", createdAt}
 		},
 		"numComments": func(id int) int {
-			row := db.QueryRow(`SELECT COUNT(*) AS c FROM comments WHERE entry_id = ?`, id)
-			var n int
-			checkErr(row.Scan(&n))
-			return n
+			return numComments(id)
 		},
 		"watch": func(name string) string {
 			stopwatch.Watch(name)
@@ -336,6 +386,14 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 	tpl := template.Must(template.New(file).Funcs(fmap).ParseFiles(getTemplatePath(file), getTemplatePath("header.html")))
 	w.WriteHeader(status)
 	checkErr(tpl.Execute(w, data))
+}
+
+func numComments(id int) int {
+	n, found := ecCache.Get(id)
+	if !found {
+		return 0
+	}
+	return n
 }
 
 func GetLogin(w http.ResponseWriter, r *http.Request) {
@@ -599,6 +657,8 @@ WHERE user_id = ?`
 }
 
 func ListEntries(w http.ResponseWriter, r *http.Request) {
+	stopwatch.Reset("GET /diary/entries/{account_name}")
+	defer stopwatch.Watch("finish GET /diary/entries/{account_name}")
 	if !authenticated(w, r) {
 		return
 	}
@@ -628,11 +688,13 @@ func ListEntries(w http.ResponseWriter, r *http.Request) {
 
 	markFootprint(w, r, owner.ID)
 
-	render(w, r, http.StatusOK, "entries.html", struct {
+	w.WriteHeader(http.StatusOK)
+
+	checkErr(EntriesMyTmpl(w, struct {
 		Owner   *User
 		Entries []Entry
 		Myself  bool
-	}{owner, entries, getCurrentUser(w, r).ID == owner.ID})
+	}{owner, entries, getCurrentUser(w, r).ID == owner.ID}))
 }
 
 func GetEntry(w http.ResponseWriter, r *http.Request) {
@@ -726,6 +788,7 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 
 	_, err = db.Exec(`INSERT INTO comments (entry_id, user_id, comment, summary) VALUES (?,?,?, SUBSTRING(comment, 1, 30))`, entry.ID, user.ID, r.FormValue("comment"))
 	checkErr(err)
+	ecCache.Incr(entry.ID, 1)
 	http.Redirect(w, r, "/diary/entry/"+strconv.Itoa(entry.ID), http.StatusSeeOther)
 }
 
@@ -812,6 +875,7 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 	initCommentsForMe()
 	initRelations()
 	initAllUsers()
+	initNumComments()
 }
 
 func init() {
@@ -1003,6 +1067,7 @@ func main() {
 
 	initAllUsers()
 	initRelations()
+	initNumComments()
 
 	var li net.Listener
 	// sock := "/dev/shm/server.sock"

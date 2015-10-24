@@ -1,0 +1,56 @@
+<%! func EntriesMyTmpl(w io.Writer, e struct {
+	Owner   *User
+	Entries []Entry
+	Myself  bool
+}) error %><%% import "strings" %%><!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="utf-8">
+    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <title>ISUxi</title>
+</head>
+
+<body class="container">
+<h1 class="jumbotron"><a href="/">ISUxiへようこそ!</a></h1>
+<h2><%= e.Owner.NickName %>さんの日記</h2>
+<% if e.Myself { %>
+<div class="row" id="entry-post-form">
+  <form method="POST" action="/diary/entry">
+    <div class="col-md-4 input-group">
+      <span class="input-group-addon">タイトル</span>
+      <input type="text" name="title" />
+    </div>
+    <div class="col-md-4 input-group">
+      <span class="input-group-addon">本文</span>
+      <textarea name="content" ></textarea>
+    </div>
+    <div class="col-md-2 input-group">
+      <span class="input-group-addon">
+        友だちのみに限定<input type="checkbox" name="private" />
+      </span>
+    </div>
+    <div class="col-md-1 input-group">
+      <input class="btn btn-default" type="submit" value="送信" />
+    </div>
+  </form>
+</div>
+<% } %>
+
+<div class="row" id="entries">
+    <% for _, entry := range(e.Entries) { %>
+    <div class="panel panel-primary entry">
+        <div class="entry-title">タイトル: <a href="/diary/entry/<%= entry.ID %>"><%= entry.Title %></a></div>
+        <div class="entry-content">
+            <% for _, s := range(strings.Split(entry.Content, "\n")) { %>
+            <%= s %><br />
+            <% } %>
+        </div>
+        <% if entry.Private { %><div class="text-danger entry-private">範囲: 友だち限定公開</div><% } %>
+        <div class="entry-created-at">更新日時: <%= entry.CreatedAt.Format("2006-01-02 15:04:05") %></div>
+        <div class="entry-comments">コメント: <%= numComments(entry.ID) %>件</div>
+    </div>
+    <% } %>
+</div>
+
+</body>
+</html>
