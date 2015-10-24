@@ -767,11 +767,6 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 func init() {
 	flag.Parse()
 
-	rd = redis.NewClient(&redis.Options{
-		Network: "unix",
-		Addr:    "/tmp/redis.sock",
-		DB:      0,
-	})
 }
 
 var commentCh = make(chan Comment, 10000)
@@ -860,10 +855,11 @@ func main() {
 	var dsn string
 	if *mysqlsock {
 		dsn = fmt.Sprintf(
-			"%s:%s@unix(%s)/%s?parseTime=true&loc=Local",
+			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
 			user,
 			password,
-			"/var/run/mysqld/mysqld.sock",
+			"instance-1",
+			port,
 			dbname,
 		)
 
@@ -883,6 +879,19 @@ func main() {
 	}
 	defer db.Close()
 
+	if (*mysqlsock) {
+		rd = redis.NewClient(&redis.Options{
+			Network: "tcp",
+			Addr:    "instance-1",
+			DB:      0,
+		})
+	} else {
+		rd = redis.NewClient(&redis.Options{
+			Network: "unix",
+			Addr:    "/tmp/redis.sock",
+			DB:      0,
+		})
+	}
 	store = sessions.NewCookieStore([]byte(ssecret))
 
 	r := mux.NewRouter()
