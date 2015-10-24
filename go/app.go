@@ -882,7 +882,7 @@ func main() {
 	if *mysqlsock {
 		rd = redis.NewClient(&redis.Options{
 			Network: "tcp",
-			Addr:    "instance-1",
+			Addr:    "instance-1:6379",
 			DB:      0,
 		})
 	} else {
