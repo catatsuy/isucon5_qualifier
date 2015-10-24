@@ -22,6 +22,8 @@ import (
 	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
+	_ "github.com/walf443/go-sql-tracer"
+	"github.com/walf443/stopwatch"
 	redis "gopkg.in/redis.v3"
 )
 
@@ -350,11 +352,15 @@ func isFriend2(friendsMap map[int]time.Time, userID int) bool {
 }
 
 func GetIndex(w http.ResponseWriter, r *http.Request) {
+	stopwatch.Watch("GET /")
 	if !authenticated(w, r) {
 		return
 	}
 
+	stopwatch.Watch("After authorize")
 	user := getCurrentUser(w, r)
+
+	stopwatch.Watch("After getCurrentUser")
 
 	prof := Profile{}
 	row := db.QueryRow(`SELECT * FROM profiles WHERE user_id = ?`, user.ID)
@@ -363,10 +369,13 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 		checkErr(err)
 	}
 
+	stopwatch.Watch("After Profile")
+
 	rows, err := db.Query(`SELECT * FROM entries WHERE user_id = ? ORDER BY created_at LIMIT 5`, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
+
 	entries := make([]Entry, 0, 5)
 	for rows.Next() {
 		var id, userID, private int
@@ -376,6 +385,8 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 		entries = append(entries, Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt})
 	}
 	rows.Close()
+
+	stopwatch.Watch("After Entry")
 
 	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, c.comment AS comment, c.created_at AS created_at
 FROM comments c
@@ -393,6 +404,8 @@ LIMIT 10`, user.ID)
 		commentsForMe = append(commentsForMe, c)
 	}
 	rows.Close()
+
+	stopwatch.Watch("After Comment")
 
 	// フレンド一覧を取得
 	rows, err = db.Query(`SELECT * FROM relations WHERE one = ? OR another = ? ORDER BY created_at DESC`, user.ID, user.ID)
@@ -422,6 +435,8 @@ LIMIT 10`, user.ID)
 	}
 	rows.Close()
 
+	stopwatch.Watch("After Relation")
+
 	entryIndex := ""
 	if len(friendIds) > 20 {
 		entryIndex = "created_at"
@@ -448,6 +463,8 @@ LIMIT 10`, user.ID)
 		}
 	}
 	rows.Close()
+
+	stopwatch.Watch("After entries")
 
 	// コメントを1000件取得し、privateであれば自分と相手がフレンドかどうかをチェックする
 	commentIndex := ""
@@ -486,10 +503,14 @@ LIMIT 10`, user.ID)
 	}
 	rows.Close()
 
+	stopwatch.Watch("After Friend Comments")
+
 	footprints, err := getFootprintsFromRedis(user.ID, 10)
 	if err != nil {
 		checkErr(err)
 	}
+
+	stopwatch.Watch("After Get Friend Comments")
 
 	render(w, r, http.StatusOK, "index.html", struct {
 		User              User
@@ -503,6 +524,7 @@ LIMIT 10`, user.ID)
 	}{
 		*user, prof, entries, commentsForMe, entriesOfFriends, commentsOfFriends, friends, footprints,
 	})
+	stopwatch.Watch("After after render")
 }
 
 func GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -806,6 +828,7 @@ func main() {
 	}
 
 	var dsn string
+	var driver string
 	if *mysqlsock {
 		dsn = fmt.Sprintf(
 			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
@@ -815,7 +838,7 @@ func main() {
 			port,
 			dbname,
 		)
-
+		driver = "mysql"
 	} else {
 		dsn = fmt.Sprintf(
 			"%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
@@ -825,8 +848,9 @@ func main() {
 			port,
 			dbname,
 		)
+		driver = "mysql:trace"
 	}
-	db, err = sql.Open("mysql", dsn)
+	db, err = sql.Open(driver, dsn)
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
