@@ -879,7 +879,7 @@ func main() {
 	}
 	defer db.Close()
 
-	if (*mysqlsock) {
+	if *mysqlsock {
 		rd = redis.NewClient(&redis.Options{
 			Network: "tcp",
 			Addr:    "instance-1",
@@ -930,19 +930,20 @@ func main() {
 	initAllUsers()
 
 	var li net.Listener
-	sock := "/dev/shm/server.sock"
+	// sock := "/dev/shm/server.sock"
 	if *tport == 0 {
-		ferr := os.Remove(sock)
-		if ferr != nil {
-			if !os.IsNotExist(ferr) {
-				panic(ferr.Error())
-			}
-		}
-		li, err = net.Listen("unix", sock)
-		cerr := os.Chmod(sock, 0666)
-		if cerr != nil {
-			panic(cerr.Error())
-		}
+		// ferr := os.Remove(sock)
+		// if ferr != nil {
+		// 	if !os.IsNotExist(ferr) {
+		// 		panic(ferr.Error())
+		// 	}
+		// }
+		// li, err = net.Listen("unix", sock)
+		// cerr := os.Chmod(sock, 0666)
+		// if cerr != nil {
+		// 	panic(cerr.Error())
+		// }
+		li, err = net.ListenTCP("tcp", &net.TCPAddr{Port: 8080})
 	} else {
 		li, err = net.ListenTCP("tcp", &net.TCPAddr{Port: int(*tport)})
 	}
