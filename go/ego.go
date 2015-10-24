@@ -6,8 +6,75 @@ import (
 "fmt"
 "html"
 "io"
+"strings"
 )
 var _ = fmt.Sprint("") // just so that we can keep the fmt import for now
+//line templates/entries.ego:1
+ func EntriesMyTmpl(w io.Writer, e struct {
+	Owner   *User
+	Entries []Entry
+	Myself  bool
+}) error  {
+//line templates/entries.ego:5
+_, _ = io.WriteString(w, "<!DOCTYPE html>\n<html>\n<head>\n    <meta http-equiv=\"Content-Type\" content=\"text/html\" charset=\"utf-8\">\n    <link rel=\"stylesheet\" href=\"/css/bootstrap.min.css\">\n    <title>ISUxi</title>\n</head>\n\n<body class=\"container\">\n<h1 class=\"jumbotron\"><a href=\"/\">ISUxiへようこそ!</a></h1>\n<h2>")
+//line templates/entries.ego:15
+_, _ = io.WriteString(w, html.EscapeString(fmt.Sprintf("%v",  e.Owner.NickName )))
+//line templates/entries.ego:15
+_, _ = io.WriteString(w, "さんの日記</h2>\n")
+//line templates/entries.ego:16
+ if e.Myself { 
+//line templates/entries.ego:17
+_, _ = io.WriteString(w, "\n<div class=\"row\" id=\"entry-post-form\">\n  <form method=\"POST\" action=\"/diary/entry\">\n    <div class=\"col-md-4 input-group\">\n      <span class=\"input-group-addon\">タイトル</span>\n      <input type=\"text\" name=\"title\" />\n    </div>\n    <div class=\"col-md-4 input-group\">\n      <span class=\"input-group-addon\">本文</span>\n      <textarea name=\"content\" ></textarea>\n    </div>\n    <div class=\"col-md-2 input-group\">\n      <span class=\"input-group-addon\">\n        友だちのみに限定<input type=\"checkbox\" name=\"private\" />\n      </span>\n    </div>\n    <div class=\"col-md-1 input-group\">\n      <input class=\"btn btn-default\" type=\"submit\" value=\"送信\" />\n    </div>\n  </form>\n</div>\n")
+//line templates/entries.ego:37
+ } 
+//line templates/entries.ego:38
+_, _ = io.WriteString(w, "\n\n<div class=\"row\" id=\"entries\">\n    ")
+//line templates/entries.ego:40
+ for _, entry := range(e.Entries) { 
+//line templates/entries.ego:41
+_, _ = io.WriteString(w, "\n    <div class=\"panel panel-primary entry\">\n        <div class=\"entry-title\">タイトル: <a href=\"/diary/entry/")
+//line templates/entries.ego:42
+_, _ = io.WriteString(w, html.EscapeString(fmt.Sprintf("%v",  entry.ID )))
+//line templates/entries.ego:42
+_, _ = io.WriteString(w, "\">")
+//line templates/entries.ego:42
+_, _ = io.WriteString(w, html.EscapeString(fmt.Sprintf("%v",  entry.Title )))
+//line templates/entries.ego:42
+_, _ = io.WriteString(w, "</a></div>\n        <div class=\"entry-content\">\n            ")
+//line templates/entries.ego:44
+ for _, s := range(strings.Split(entry.Content, "\n")) { 
+//line templates/entries.ego:45
+_, _ = io.WriteString(w, "\n            ")
+//line templates/entries.ego:45
+_, _ = io.WriteString(w, html.EscapeString(fmt.Sprintf("%v",  s )))
+//line templates/entries.ego:45
+_, _ = io.WriteString(w, "<br />\n            ")
+//line templates/entries.ego:46
+ } 
+//line templates/entries.ego:47
+_, _ = io.WriteString(w, "\n        </div>\n        ")
+//line templates/entries.ego:48
+ if entry.Private { 
+//line templates/entries.ego:48
+_, _ = io.WriteString(w, "<div class=\"text-danger entry-private\">範囲: 友だち限定公開</div>")
+//line templates/entries.ego:48
+ } 
+//line templates/entries.ego:49
+_, _ = io.WriteString(w, "\n        <div class=\"entry-created-at\">更新日時: ")
+//line templates/entries.ego:49
+_, _ = io.WriteString(w, html.EscapeString(fmt.Sprintf("%v",  entry.CreatedAt.Format("2006-01-02 15:04:05") )))
+//line templates/entries.ego:49
+_, _ = io.WriteString(w, "</div>\n        <div class=\"entry-comments\">コメント: ")
+//line templates/entries.ego:50
+_, _ = io.WriteString(w, html.EscapeString(fmt.Sprintf("%v",  numComments(entry.ID) )))
+//line templates/entries.ego:50
+_, _ = io.WriteString(w, "件</div>\n    </div>\n    ")
+//line templates/entries.ego:52
+ } 
+//line templates/entries.ego:53
+_, _ = io.WriteString(w, "\n</div>\n\n</body>\n</html>\n")
+return nil
+}
 //line templates/index.ego:1
  func MyTmpl(w io.Writer, e struct {
 	User              User
