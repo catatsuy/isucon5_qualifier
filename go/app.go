@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -74,6 +75,12 @@ type CommentWithEntry struct {
 	Comment   string
 	CreatedAt time.Time
 	Entry     Entry
+}
+
+type Relation struct {
+	oneID     int
+	anotherID int
+	createdAt time.Time
 }
 
 type Friend struct {
@@ -407,25 +414,13 @@ LIMIT 10`, user.ID)
 
 	stopwatch.Watch("After Comment")
 
-	// フレンド一覧を取得
-	rows, err = db.Query(`SELECT * FROM relations WHERE one = ?`, user.ID)
-	if err != sql.ErrNoRows {
-		checkErr(err)
-	}
+	relations := friendsForMe[user.ID]
 	friendsMap := make(map[int]time.Time)
 	friendIds := make([]string, 0)
-	for rows.Next() {
-		var id, one, another int
-		var createdAt time.Time
-		checkErr(rows.Scan(&id, &one, &another, &createdAt))
-		var friendID int
-		if one == user.ID {
-			friendID = another
-		} else {
-			friendID = one
-		}
+	for _, r := range relations {
+		friendID := r.anotherID
 		if _, ok := friendsMap[friendID]; !ok {
-			friendsMap[friendID] = createdAt
+			friendsMap[friendID] = r.createdAt
 			friendIds = append(friendIds, strconv.Itoa(friendID))
 		}
 	}
@@ -782,6 +777,21 @@ func PostFriends(w http.ResponseWriter, r *http.Request) {
 	if !isFriendAccount(w, r, anotherAccount) {
 		another := getUserFromAccount(w, anotherAccount)
 		_, err := db.Exec(`INSERT INTO relations (one, another) VALUES (?,?), (?,?)`, user.ID, another.ID, another.ID, user.ID)
+
+		r1 := Relation{}
+		r1.oneID = user.ID
+		r1.anotherID = another.ID
+		r1.createdAt = time.Now()
+
+		friendsForMe[user.ID] = append(friendsForMe[user.ID], r1)
+
+		r2 := Relation{}
+		r2.oneID = user.ID
+		r2.anotherID = another.ID
+		r2.createdAt = time.Now()
+
+		friendsForMe[user.ID] = append(friendsForMe[user.ID], r2)
+
 		checkErr(err)
 		http.Redirect(w, r, "/friends", http.StatusSeeOther)
 	}
@@ -792,12 +802,93 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 	db.Exec("DELETE FROM footprints WHERE id > 500000")
 	db.Exec("DELETE FROM entries WHERE id > 500000")
 	db.Exec("DELETE FROM comments WHERE id > 1500000")
+	initCommentsForMe()
+	initRelations()
 	initAllUsers()
 }
 
 func init() {
 	flag.Parse()
 
+	rd = redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   0,
+	})
+}
+
+var commentCh = make(chan Comment, 10000)
+var commentsForMeTable = make(map[int][]Comment)
+var commentsForMeMutex = sync.Mutex{}
+var friendsForMe = make(map[int][]Relation)
+
+func commentsForMeWorker() {
+	for {
+		comment := <-commentCh
+		commentsForMeMutex.Lock()
+		_, ok := commentsForMeTable[comment.UserID]
+		if !ok {
+			commentsForMeTable[comment.UserID] = make([]Comment, 0, 100)
+		}
+		commentsForMeTable[comment.UserID] = append(commentsForMeTable[comment.UserID], comment)
+		commentsForMeMutex.Unlock()
+	}
+}
+
+func getCommentsForMe(userID int, num int) []Comment {
+	commentsForMeMutex.Lock()
+	defer commentsForMeMutex.Unlock()
+
+	comments, ok := commentsForMeTable[userID]
+	if !ok {
+		return make([]Comment, 0)
+	}
+	coms := make([]Comment, num)
+	for i, c := range comments[len(comments)-num:] {
+		coms[num-i-1] = c
+	}
+	return coms
+}
+
+func initCommentsForMe() {
+	commentsForMeMutex.Lock()
+	commentsForMeTable = make(map[int][]Comment)
+	commentsForMeMutex.Unlock()
+
+	fmt.Println("start initCommentsForMe")
+
+	rows, err := db.Query(`SELECT * FROM comments ORDER BY created_at ASC`)
+	if err != nil && err != sql.ErrNoRows {
+		panic(err)
+	}
+	for rows.Next() {
+		c := Comment{}
+		err = rows.Scan(&c.ID, &c.EntryID, &c.UserID, &c.Comment, &c.CreatedAt)
+		if err != nil {
+			panic(err)
+		}
+		commentCh <- c
+	}
+	rows.Close()
+
+	fmt.Println("finish initCommentsForMe")
+}
+
+func initRelations() {
+	fmt.Println("start initRelations")
+
+	rows, err := db.Query(`SELECT one, another, created_at FROM relations ORDER BY id ASC`)
+	if err != nil && err != sql.ErrNoRows {
+		panic(err)
+	}
+	for rows.Next() {
+		r := Relation{}
+		err = rows.Scan(&r.oneID, &r.anotherID, &r.createdAt)
+		if err != nil {
+			panic(err)
+		}
+		friendsForMe[r.oneID] = append(friendsForMe[r.oneID], r)
+	}
+	fmt.Println("finish initRelations")
 }
 
 func main() {
@@ -903,6 +994,7 @@ func main() {
 	signal.Notify(sigchan, syscall.SIGINT)
 
 	initAllUsers()
+	initRelations()
 
 	var li net.Listener
 	// sock := "/dev/shm/server.sock"
@@ -929,6 +1021,8 @@ func main() {
 		// func Serve(l net.Listener, handler Handler) error
 		log.Println(http.Serve(li, r))
 	}()
+
+	go commentsForMeWorker()
 
 	<-sigchan
 
