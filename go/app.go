@@ -143,7 +143,7 @@ func getCurrentUser(w http.ResponseWriter, r *http.Request) *User {
 	if !ok {
 		return nil
 	}
-	return getUser(w, userIDInt)
+	return getUser(userIDInt)
 }
 
 func authenticated(w http.ResponseWriter, r *http.Request) bool {
@@ -157,7 +157,7 @@ func authenticated(w http.ResponseWriter, r *http.Request) bool {
 
 var allUsers = make(map[int]User, 50000)
 
-func getUser(w http.ResponseWriter, userID int) *User {
+func getUser(userID int) *User {
 	user, ok := allUsers[userID]
 	if !ok {
 		checkErr(ErrContentNotFound)
@@ -296,7 +296,7 @@ func getTemplatePath(file string) string {
 func render(w http.ResponseWriter, r *http.Request, status int, file string, data interface{}) {
 	fmap := template.FuncMap{
 		"getUser": func(id int) *User {
-			return getUser(w, id)
+			return getUser(id)
 		},
 		"getCurrentUser": func() *User {
 			return getCurrentUser(w, r)
@@ -511,7 +511,9 @@ LIMIT 10`, user.ID)
 
 	stopwatch.Watch("After Get Friend Comments")
 
-	render(w, r, http.StatusOK, "index.html", struct {
+	w.WriteHeader(http.StatusOK)
+
+	checkErr(MyTmpl(w, struct {
 		User              User
 		Profile           Profile
 		Entries           []Entry
@@ -522,7 +524,7 @@ LIMIT 10`, user.ID)
 		Footprints        []Footprint
 	}{
 		*user, prof, entries, commentsForMe, entriesOfFriends, commentsOfFriends, friends, footprints,
-	})
+	}))
 	stopwatch.Watch("After after render")
 }
 
@@ -647,7 +649,7 @@ func GetEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	checkErr(err)
 	entry := Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt}
-	owner := getUser(w, entry.UserID)
+	owner := getUser(entry.UserID)
 	if entry.Private {
 		if !permitted(w, r, owner.ID) {
 			checkErr(ErrPermissionDenied)
@@ -713,7 +715,7 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 	checkErr(err)
 
 	entry := Entry{id, userID, private == 1, strings.SplitN(body, "\n", 2)[0], strings.SplitN(body, "\n", 2)[1], createdAt}
-	owner := getUser(w, entry.UserID)
+	owner := getUser(entry.UserID)
 	if entry.Private {
 		if !permitted(w, r, owner.ID) {
 			checkErr(ErrPermissionDenied)
@@ -895,6 +897,7 @@ func initRelations() {
 	fmt.Println("finish initRelations")
 }
 
+//go:generate ego -package main templates
 func main() {
 	host := os.Getenv("ISUCON5_DB_HOST")
 	if host == "" {
