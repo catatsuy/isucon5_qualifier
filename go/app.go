@@ -461,8 +461,8 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, c.summary, c.created_at AS created_at
 FROM comments c
 JOIN entries e ON c.entry_id = e.id
-WHERE e.user_id = ?
-ORDER BY c.created_at DESC
+WHERE c.entry_user_id = ?
+ORDER BY c.id DESC
 LIMIT 10`, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
@@ -786,7 +786,7 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 	}
 	user := getCurrentUser(w, r)
 
-	_, err = db.Exec(`INSERT INTO comments (entry_id, user_id, comment, summary) VALUES (?,?,?, SUBSTRING(comment, 1, 30))`, entry.ID, user.ID, r.FormValue("comment"))
+	_, err = db.Exec(`INSERT INTO comments (entry_id, user_id, comment, entry_user_id, summary) VALUES (?,?,?,?,SUBSTRING(comment, 1, 30))`, entry.ID, user.ID, r.FormValue("comment"), entry.UserID)
 	checkErr(err)
 	ecCache.Incr(entry.ID, 1)
 	http.Redirect(w, r, "/diary/entry/"+strconv.Itoa(entry.ID), http.StatusSeeOther)
