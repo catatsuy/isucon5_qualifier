@@ -315,7 +315,7 @@ func render(w http.ResponseWriter, r *http.Request, status int, file string, dat
 		},
 		"split": strings.Split,
 		"getEntry": func(id int) Entry {
-			row := db.QueryRow(`SELECT entries.id, entries.user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries WHERE id=?`, id)
+			row := db.QueryRow(`SELECT entries.id, entries.user_id, private, entries.title, created_at FROM entries WHERE id=?`, id)
 			var entryID, userID, private int
 			var subject string
 			var createdAt time.Time
@@ -383,7 +383,7 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 
 	stopwatch.Watch("After Profile")
 
-	rows, err := db.Query(`SELECT * FROM entries WHERE user_id = ? ORDER BY created_at LIMIT 5`, user.ID)
+	rows, err := db.Query(`SELECT id, user_id, private, body, created_at FROM entries WHERE user_id = ? ORDER BY created_at LIMIT 5`, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -400,7 +400,7 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 
 	stopwatch.Watch("After Entry")
 
-	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, SUBSTRING(c.comment, 1, 30) AS comment, c.created_at AS created_at
+	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, c.summary, c.created_at AS created_at
 FROM comments c
 JOIN entries e ON c.entry_id = e.id
 WHERE e.user_id = ?
@@ -444,7 +444,7 @@ LIMIT 10`, user.ID)
 		entryIndex = "user_id"
 	}
 	// fmt.Println(entryIndex)
-	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, SUBSTRING_INDEX(body, '\n', 1) as subject, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
+	rows, err = db.Query(fmt.Sprintf(`SELECT id, user_id, private, title, created_at FROM entries FORCE INDEX(%s) WHERE user_id IN (%s) ORDER BY created_at DESC LIMIT 10`, entryIndex, strings.Join(friendIds, ",")))
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -473,7 +473,7 @@ LIMIT 10`, user.ID)
 	} else {
 		commentIndex = "user_id"
 	}
-	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING(comment, 1, 30) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
+	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, c.summary, c.created_at, e.id, e.user_id, e.private, e.title, e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
 	// fmt.Println(query)
 	rows, err = db.Query(query)
 	if err != sql.ErrNoRows {
@@ -542,9 +542,9 @@ func GetProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	var query string
 	if permitted(w, r, owner.ID) {
-		query = `SELECT * FROM entries WHERE user_id = ? ORDER BY created_at LIMIT 5`
+		query = `SELECT id, user_id, private, body, created_at FROM entries WHERE user_id = ? ORDER BY created_at LIMIT 5`
 	} else {
-		query = `SELECT * FROM entries WHERE user_id = ? AND private=0 ORDER BY created_at LIMIT 5`
+		query = `SELECT id, user_id, private, body, created_at FROM entries WHERE user_id = ? AND private=0 ORDER BY created_at LIMIT 5`
 	}
 	rows, err := db.Query(query, owner.ID)
 	if err != sql.ErrNoRows {
@@ -605,9 +605,9 @@ func ListEntries(w http.ResponseWriter, r *http.Request) {
 	owner := getUserFromAccount(w, account)
 	var query string
 	if permitted(w, r, owner.ID) {
-		query = `SELECT * FROM entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`
+		query = `SELECT id, user_id, private, body, created_at FROM entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`
 	} else {
-		query = `SELECT * FROM entries WHERE user_id = ? AND private=0 ORDER BY created_at DESC LIMIT 20`
+		query = `SELECT id, user_id, private, body, created_at FROM entries WHERE user_id = ? AND private=0 ORDER BY created_at DESC LIMIT 20`
 	}
 	rows, err := db.Query(query, owner.ID)
 	if err != sql.ErrNoRows {
@@ -638,7 +638,7 @@ func GetEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entryID := mux.Vars(r)["entry_id"]
-	row := db.QueryRow(`SELECT * FROM entries WHERE id = ?`, entryID)
+	row := db.QueryRow(`SELECT id, user_id, private, body, created_at FROM entries WHERE id = ?`, entryID)
 	var id, userID, private int
 	var body string
 	var createdAt time.Time
@@ -654,7 +654,7 @@ func GetEntry(w http.ResponseWriter, r *http.Request) {
 			checkErr(ErrPermissionDenied)
 		}
 	}
-	rows, err := db.Query(`SELECT * FROM comments WHERE entry_id = ?`, entry.ID)
+	rows, err := db.Query(`SELECT id, entry_id, user_id, comment, created_at FROM comments WHERE entry_id = ?`, entry.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
@@ -692,7 +692,7 @@ func PostEntry(w http.ResponseWriter, r *http.Request) {
 	} else {
 		private = 1
 	}
-	_, err := db.Exec(`INSERT INTO entries (user_id, private, body) VALUES (?,?,?)`, user.ID, private, title+"\n"+content)
+	_, err := db.Exec(`INSERT INTO entries (user_id, private, body, title) VALUES (?,?,?, SUBSTRING_INDEX(body, '\n', 1))`, user.ID, private, title+"\n"+content)
 	checkErr(err)
 	http.Redirect(w, r, "/diary/entries/"+user.AccountName, http.StatusSeeOther)
 }
@@ -703,7 +703,7 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entryID := mux.Vars(r)["entry_id"]
-	row := db.QueryRow(`SELECT * FROM entries WHERE id = ?`, entryID)
+	row := db.QueryRow(`SELECT id, user_id, private, body, created_at FROM entries WHERE id = ?`, entryID)
 	var id, userID, private int
 	var body string
 	var createdAt time.Time
@@ -722,7 +722,7 @@ func PostComment(w http.ResponseWriter, r *http.Request) {
 	}
 	user := getCurrentUser(w, r)
 
-	_, err = db.Exec(`INSERT INTO comments (entry_id, user_id, comment) VALUES (?,?,?)`, entry.ID, user.ID, r.FormValue("comment"))
+	_, err = db.Exec(`INSERT INTO comments (entry_id, user_id, comment, summary) VALUES (?,?,?, SUBSTRING(comment, 1, 30))`, entry.ID, user.ID, r.FormValue("comment"))
 	checkErr(err)
 	http.Redirect(w, r, "/diary/entry/"+strconv.Itoa(entry.ID), http.StatusSeeOther)
 }
@@ -861,7 +861,7 @@ func initCommentsForMe() {
 
 	fmt.Println("start initCommentsForMe")
 
-	rows, err := db.Query(`SELECT * FROM comments ORDER BY created_at ASC`)
+	rows, err := db.Query(`SELECT id, entry_id, user_id, comment, created_at FROM comments ORDER BY created_at ASC`)
 	if err != nil && err != sql.ErrNoRows {
 		panic(err)
 	}
