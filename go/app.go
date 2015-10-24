@@ -131,11 +131,15 @@ func getCurrentUser(w http.ResponseWriter, r *http.Request) *User {
 	if !ok || userID == nil {
 		return nil
 	}
-	userIDInt, ok := userID.(int)
-	if !ok {
-		return nil
+	row := db.QueryRow(`SELECT id, account_name, nick_name, email FROM users WHERE id=?`, userID)
+	user := User{}
+	err := row.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email)
+	if err == sql.ErrNoRows {
+		checkErr(ErrAuthentication)
 	}
-	return getUser(w, userIDInt)
+	checkErr(err)
+	context.Set(r, "user", user)
+	return &user
 }
 
 func authenticated(w http.ResponseWriter, r *http.Request) bool {
