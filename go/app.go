@@ -363,7 +363,8 @@ func isFriend2(friendsMap map[int]time.Time, userID int) bool {
 }
 
 func GetIndex(w http.ResponseWriter, r *http.Request) {
-	stopwatch.Watch("GET /")
+	stopwatch.Reset("GET /")
+	defer stopwatch.Watch("finish GET /")
 	if !authenticated(w, r) {
 		return
 	}
@@ -399,7 +400,7 @@ func GetIndex(w http.ResponseWriter, r *http.Request) {
 
 	stopwatch.Watch("After Entry")
 
-	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, c.comment AS comment, c.created_at AS created_at
+	rows, err = db.Query(`SELECT c.id AS id, c.entry_id AS entry_id, c.user_id AS user_id, SUBSTRING(c.comment, 1, 30) AS comment, c.created_at AS created_at
 FROM comments c
 JOIN entries e ON c.entry_id = e.id
 WHERE e.user_id = ?
@@ -472,7 +473,7 @@ LIMIT 10`, user.ID)
 	} else {
 		commentIndex = "user_id"
 	}
-	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING_INDEX(comment, '\n', 1) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
+	query := fmt.Sprintf(`SELECT c.id, c.entry_id, c.user_id, SUBSTRING(comment, 1, 30) as comment, c.created_at, e.id, e.user_id, e.private, SUBSTRING_INDEX(e.body, '\n', 1), e.created_at FROM comments c FORCE INDEX (%s) JOIN entries e ON c.entry_id = e.id WHERE c.user_id IN (%s) ORDER BY c.created_at DESC LIMIT 10`, commentIndex, strings.Join(friendIds, ","))
 	// fmt.Println(query)
 	rows, err = db.Query(query)
 	if err != sql.ErrNoRows {
@@ -744,7 +745,7 @@ func GetFriends(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := getCurrentUser(w, r)
-	rows, err := db.Query(`SELECT * FROM relations WHERE one = ? ORDER BY created_at DESC`, user.ID, user.ID)
+	rows, err := db.Query(`SELECT * FROM relations WHERE one = ? ORDER BY created_at DESC`, user.ID)
 	if err != sql.ErrNoRows {
 		checkErr(err)
 	}
