@@ -151,33 +151,15 @@ func authenticated(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-var allUsers = make(map[int]User, 50000)
-
 func getUser(w http.ResponseWriter, userID int) *User {
-	user, ok := allUsers[userID]
-	if !ok {
+	row := db.QueryRow(`SELECT * FROM users WHERE id = ?`, userID)
+	user := User{}
+	err := row.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email, new(string))
+	if err == sql.ErrNoRows {
 		checkErr(ErrContentNotFound)
 	}
+	checkErr(err)
 	return &user
-}
-
-func initAllUsers() {
-	allUsers = make(map[int]User, 50000)
-	fmt.Println("start initAllUsers")
-	rows, err := db.Query(`SELECT * FROM users`)
-	if err != nil && err != sql.ErrNoRows {
-		panic(err)
-	}
-	for rows.Next() {
-		user := User{}
-		err := rows.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email, new(string))
-		if err != nil {
-			panic(err)
-		}
-		allUsers[user.ID] = user
-	}
-	rows.Close()
-	fmt.Println("finish initAllUsers")
 }
 
 func getUserFromAccount(w http.ResponseWriter, name string) *User {
@@ -765,7 +747,6 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 	db.Exec("DELETE FROM entries WHERE id > 500000")
 	db.Exec("DELETE FROM comments WHERE id > 1500000")
 	initCommentsForMe()
-	initAllUsers()
 }
 
 func init() {
@@ -930,8 +911,7 @@ func main() {
 	signal.Notify(sigchan, syscall.SIGINT)
 
 	go commentsForMeWorker()
-	initCommentsForMe() // edvakf
-	initAllUsers()
+	initCommentsForMe()
 
 	var li net.Listener
 	// sock := "/dev/shm/server.sock"
