@@ -571,7 +571,7 @@ LIMIT 10`, user.ID)
 
 	w.WriteHeader(http.StatusOK)
 
-	checkErr(MyTmpl(w, struct {
+	MyTmpl(w, struct {
 		User              User
 		Profile           Profile
 		Entries           []Entry
@@ -582,7 +582,7 @@ LIMIT 10`, user.ID)
 		Footprints        []Footprint
 	}{
 		*user, prof, entries, commentsForMe, entriesOfFriends, commentsOfFriends, friends, footprints,
-	}))
+	})
 	stopwatch.Watch("After after render")
 }
 
@@ -689,11 +689,11 @@ func ListEntries(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 
-	checkErr(EntriesMyTmpl(w, struct {
+	EntriesMyTmpl(w, struct {
 		Owner   *User
 		Entries []Entry
 		Myself  bool
-	}{owner, entries, getCurrentUser(w, r).ID == owner.ID}))
+	}{owner, entries, getCurrentUser(w, r).ID == owner.ID})
 }
 
 func GetEntry(w http.ResponseWriter, r *http.Request) {
@@ -961,7 +961,7 @@ func initRelations() {
 	fmt.Println("finish initRelations")
 }
 
-//go:generate ego -package main templates
+//go:generate ego
 func main() {
 	host := os.Getenv("ISUCON5_DB_HOST")
 	if host == "" {

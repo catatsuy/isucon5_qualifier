@@ -1,4 +1,7 @@
-<%! func MyTmpl(w io.Writer, e struct {
+<%
+package main
+
+func MyTmpl(w io.Writer, e struct {
 	User              User
 	Profile           Profile
 	Entries           []Entry
@@ -7,7 +10,7 @@
 	CommentsOfFriends []CommentWithEntry
 	Friends           []Friend
 	Footprints        []Footprint
-}) error %><!DOCTYPE html>
+}) { %><!DOCTYPE html>
 <html>
 <head>
     <meta http-equiv="Content-Type" content="text/html" charset="utf-8">
@@ -111,3 +114,4 @@
 
 </body>
 </html>
+<% } %>

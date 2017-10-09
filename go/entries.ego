@@ -1,8 +1,13 @@
-<%! func EntriesMyTmpl(w io.Writer, e struct {
+<%
+package main
+
+import "strings"
+
+func EntriesMyTmpl(w io.Writer, e struct {
 	Owner   *User
 	Entries []Entry
 	Myself  bool
-}) error %><%% import "strings" %%><!DOCTYPE html>
+}) { %><!DOCTYPE html>
 <html>
 <head>
     <meta http-equiv="Content-Type" content="text/html" charset="utf-8">
@@ -54,3 +59,4 @@
 
 </body>
 </html>
+<% } %>
